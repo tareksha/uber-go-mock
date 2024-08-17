@@ -407,6 +407,53 @@ var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
 var byteType = reflect.TypeOf(byte(0))
 
+func parseTypeList(tn string) ([]Type, int) {
+	t0, endAll := parseTypeSingle(tn)
+	types := []Type{t0}
+	for {
+		switch tn[endAll] {
+		case ',':
+			t1, end1 := parseTypeSingle(tn[endAll+1:])
+			types = append(types, t1)
+			endAll += end1 + 1
+		case ']':
+			return types, endAll
+		}
+	}
+}
+
+func parseTypeSingle(tn string) (Type, int) {
+	nameEnd := len(tn)
+	end := len(tn)
+	var params *TypeParametersType
+	var pkgEnd int
+LOOP:
+	for i, c := range tn {
+		switch c {
+		case '.':
+			pkgEnd = i
+		case '[':
+			nameEnd = i
+			subs, subEnd := parseTypeList(tn[i+1:])
+			params = &TypeParametersType{TypeParameters: subs}
+			end = i + subEnd + 2 // include ']'
+			break LOOP
+		case ',', ']':
+			nameEnd = i
+			end = i
+			break LOOP
+		}
+	}
+	var name, pkg string
+	if pkgEnd > 0 {
+		pkg = impPath(tn[:pkgEnd])
+		name = tn[pkgEnd+1 : nameEnd]
+	} else {
+		name = tn[:nameEnd]
+	}
+	return &NamedType{Type: name, Package: pkg, TypeParams: params}, end
+}
+
 func typeFromType(t reflect.Type) (Type, error) {
 	// Hack workaround for https://golang.org/issue/3853.
 	// This explicit check should not be necessary.
@@ -415,10 +462,8 @@ func typeFromType(t reflect.Type) (Type, error) {
 	}
 
 	if imp := t.PkgPath(); imp != "" {
-		return &NamedType{
-			Package: impPath(imp),
-			Type:    t.Name(),
-		}, nil
+		tn, _ := parseTypeSingle(t.Name())
+		return tn, nil
 	}
 
 	// only unnamed or predeclared types after here
